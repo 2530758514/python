@@ -23,13 +23,13 @@ print(len(student))    # 2：键值对数量
 
 `student` 类似前端常见的对象数据，但 Python 字典不是 JS 对象的完全对应物。
 
-| 需求 | Python 字典 | JS 对照 |
-| --- | --- | --- |
-| 按字符串键读取 | `student['name']` | `student['name']` 或 `student.name` |
-| 属性式读取 | `student.name` 不用于读取这个字典键 | 普通对象常用点语法 |
-| 缺失键 | `student['missing']` 抛出 `KeyError` | 普通缺失属性通常得到 `undefined` |
-| 键的类型 | 支持可哈希对象 | 普通对象键主要是字符串或 Symbol；Map 可使用更多类型 |
-| 成员判断 | `'name' in student` 检查字典键 | 普通对象的 `in` 还可能检查到原型链属性 |
+| 需求           | Python 字典                          | JS 对照                                             |
+| -------------- | ------------------------------------ | --------------------------------------------------- |
+| 按字符串键读取 | `student['name']`                    | `student['name']` 或 `student.name`                 |
+| 属性式读取     | `student.name` 不用于读取这个字典键  | 普通对象常用点语法                                  |
+| 缺失键         | `student['missing']` 抛出 `KeyError` | 普通缺失属性通常得到 `undefined`                    |
+| 键的类型       | 支持可哈希对象                       | 普通对象键主要是字符串或 Symbol；Map 可使用更多类型 |
+| 成员判断       | `'name' in student` 检查字典键       | 普通对象的 `in` 还可能检查到原型链属性              |
 
 字典与列表选择：一组按顺序排列的成绩可用列表；需要根据姓名找成绩时，字典更自然。二者也常组合使用。
 
@@ -86,11 +86,11 @@ print('王五' in scores)         # False：get 默认值不会写入字典
 # print(scores['王五'])         # KeyError
 ```
 
-| 写法 | 键存在 | 键不存在 |
-| --- | --- | --- |
-| `data[key]` | 返回值 | 抛出 `KeyError` |
-| `data.get(key)` | 返回值 | 返回 `None` |
-| `data.get(key, default)` | 返回值 | 返回指定默认值 |
+| 写法                     | 键存在 | 键不存在        |
+| ------------------------ | ------ | --------------- |
+| `data[key]`              | 返回值 | 抛出 `KeyError` |
+| `data.get(key)`          | 返回值 | 返回 `None`     |
+| `data.get(key, default)` | 返回值 | 返回指定默认值  |
 
 字段必须存在时，使用 `[]` 可以及时暴露数据问题；可选字段可以用 `get()` 提供缺省值，不要把所有错误都用默认值掩盖。
 
@@ -131,13 +131,13 @@ print(scores)                       # {'张三': 100, '王五': 0}
 
 ## 5. 删除与清空
 
-| 操作 | 用途 | 返回值 / 注意 |
-| --- | --- | --- |
-| `del data[key]` | 删除键值对 | 键不存在抛出 `KeyError`；`del` 是语句 |
-| `data.pop(key)` | 删除并取回对应值 | 键不存在抛出 `KeyError` |
-| `data.pop(key, default)` | 删除并取回值，缺失时返回默认值 | 有默认值时不因键缺失报错 |
-| `data.popitem()` | 删除并返回最后插入的键值对 | 返回二元组；空字典抛出 `KeyError` |
-| `data.clear()` | 清空原字典 | 返回 `None` |
+| 操作                     | 用途                           | 返回值 / 注意                         |
+| ------------------------ | ------------------------------ | ------------------------------------- |
+| `del data[key]`          | 删除键值对                     | 键不存在抛出 `KeyError`；`del` 是语句 |
+| `data.pop(key)`          | 删除并取回对应值               | 键不存在抛出 `KeyError`               |
+| `data.pop(key, default)` | 删除并取回值，缺失时返回默认值 | 有默认值时不因键缺失报错              |
+| `data.popitem()`         | 删除并返回最后插入的键值对     | 返回二元组；空字典抛出 `KeyError`     |
+| `data.clear()`           | 清空原字典                     | 返回 `None`                           |
 
 ```python
 scores = {'张三': 100, '李四': 90}
@@ -221,6 +221,11 @@ print(passed)  # {'张三': 100, '王五': 80}
 
 squares = {number: number ** 2 for number in range(1, 4)}
 print(squares) # {1: 1, 2: 4, 3: 9}
+
+items = ['张三', '李四', '王五']
+prices = [100, 55, 80]
+d = {item.upper():price for item, price in zip(items, prices)}
+print(d)
 ```
 
 基本形式为 `{键表达式: 值表达式 for ...}`，与列表生成式对应，但产生的是字典。如果生成重复键，后生成的值会覆盖前面的值。
@@ -286,6 +291,7 @@ print({key: value for key, value in data.items() if value is not None})
 ```
 
 > [!question]- 展开查看答案
+>
 > - 前四行依次输出 `0`、`None`、`9`、`False`。默认值只在键缺失时使用，不会写入字典。
 > - `removed` 是 `0`，是被移除的值。
 > - 视图展开得到 `['b', 'c']`，反映添加和删除之后的键。

@@ -51,7 +51,12 @@
 # for item in scores:
 #     print(item, scores[item], scores.get(item))
 
-settings = {'timeout': 0, 'nickname': None}
-print(settings.get('timeout', 30))
-print(settings.get('timeout') or 30)
-print(settings.get('timeout2', 40))
+# settings = {'timeout': 0, 'nickname': None}
+# print(settings.get('timeout', 30))
+# print(settings.get('timeout') or 30)
+# print(settings.get('timeout2', 40))
+
+items = ['张三', '李四', '王五']
+prices = [100, 55, 80]
+d = {item.upper():price for item, price in zip(items, prices)}
+print(d)
