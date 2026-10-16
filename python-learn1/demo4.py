@@ -44,3 +44,6 @@
 #         sum += item
 
 # print('总和:', sum)
+
+i = 10
+print('大' if i > 10 else '小')
