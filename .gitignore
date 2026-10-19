@@ -1,0 +1,4 @@
+# Python 导入模块时生成的字节码缓存
+__pycache__/
+*.pyc
+*.pyo
