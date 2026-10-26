@@ -1,3 +1,5 @@
+import os
+
 filename = 'student.txt'
 
 def main():
@@ -74,21 +76,59 @@ def insert():
     save(student_list)
     print('学生信息录入完毕')
 
-def save(lst):
+'''
+def save1(lst):
     try:
-        stu_txt = open(filename, 'a', encoding='utf-8')
+        # stu_txt = open(filename, 'a', encoding='utf-8') # Use a context manager for opening files
+        with open(filename, 'a', encoding='utf-8') as stu_txt:
+            pass
     except ValueError:
-        stu_txt = open(filename, 'w', encoding='utf-8')
-
+        with open(filename, 'w', encoding='utf-8') as stu_txt:
+                    pass
     for item in lst:
         stu_txt.writelines(str(item) + '\n')
     stu_txt.close()
+'''
+def save(lst):
+    with open(filename, 'a', encoding='utf-8') as stu_txt:
+        for item in lst:
+            stu_txt.writelines(str(item) + '\n')
 
 def search():
     pass
 
 def delete():
-    pass
+    while True:
+        student_id = input('删除ID')
+        if student_id != '':
+            if os.path.exists(filename):
+                with open(filename, 'r', encoding='utf-8') as file:
+                    student_old = file.readlines()
+            else:
+                student_old = []
+            flag = False
+            if student_old:
+                with open(filename, 'w', encoding='utf-8') as wfile:
+                    d = {}
+                    for item in student_old:
+                        d = dict(eval(item))
+                        if d['id'] != student_id:
+                            wfile.write(str(d) + '\n')
+                        else:
+                            flag = True
+                    if flag:
+                        print(f'已经删除了{student_id}的学生')
+                    else:
+                        print(f'没有找到{student_id}的学生')
+            else:
+                print('无学生信息')
+                break
+            show()
+            answer = input('是否继续删除?y/n\n')
+            if answer == 'y':
+                continue
+            else:
+                break
 
 def modify():
     pass

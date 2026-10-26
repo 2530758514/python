@@ -1,9 +1,10 @@
-"""学生系统录入功能对照版：保留原文件，只实现当前学到的录入与保存。"""
+"""学生系统对照版：实现当前学到的录入、保存与按 ID 删除。"""
 
 # 运行：python python-learn2/stusystem-ai.py
 # 数据保存在本文件同目录的 student-ai.jsonl，每行一个 JSON 对象。
 # 不读取或改写原程序的 student.txt。类型标注写法要求 Python 3.9+。
 import json  # 字典与 JSON 文本互转，对应 JS 的 JSON.stringify / JSON.parse 用途。
+import tempfile  # 创建临时文件；删除时先写副本，再替换原数据文件。
 from pathlib import Path  # 路径对象，提供路径拼接和 open 等方法。
 from typing import TypedDict  # 向编辑器说明字典字段，不自动做运行时校验。
 
@@ -38,10 +39,10 @@ def read_score(subject: str) -> int:
         print('成绩必须在 0～100 之间，请重新输入。')
 
 
-def read_existing_ids(path: Path = DATA_FILE) -> set[str]:
-    """读取已有 ID。仅把文件不存在当作首次运行，不忽略损坏数据。"""
-    # path 是参数，Path 是类型，DATA_FILE 是默认值；set[str] 表示字符串集合。
-    # 冒号后是类型标注，右侧 set() 才是真正创建空集合。
+def read_student_lines(path: Path = DATA_FILE) -> list[tuple[str, str]]:
+    """返回每条记录的 (ID, 原文本行)，供查重与删除复用。只校验 JSON 和 ID。"""
+    # 保留原文本行，删除时不重建其他学生的字典，避免遗漏尚未用到的字段。
+    rows: list[tuple[str, str]] = []
     existing_ids: set[str] = set()
     try:
         with path.open('r', encoding='utf-8') as file:
@@ -65,9 +66,18 @@ def read_existing_ids(path: Path = DATA_FILE) -> set[str]:
                 if student_id in existing_ids:
                     raise ValueError(f'数据文件第 {line_number} 行存在重复 ID：{student_id}')
                 existing_ids.add(student_id)
+                # 每项保存 (ID, 原文本行)，后续可解包为 current_id, line。
+                rows.append((student_id, line))
     except FileNotFoundError:
-        return existing_ids
-    return existing_ids
+        return rows
+    return rows
+
+
+def read_existing_ids(path: Path = DATA_FILE) -> set[str]:
+    """读取已有 ID；与删除功能共用同一份数据读取和校验逻辑。"""
+    # path 是参数，Path 是类型，DATA_FILE 是默认值；set[str] 表示字符串集合。
+    # 后面的 for 负责逐项解包，最前面的 student_id 决定收集什么；_line 表示本处不用文本行。
+    return {student_id for student_id, _line in read_student_lines(path)}
 
 
 def save(students: list[Student], path: Path = DATA_FILE) -> None:
@@ -118,10 +128,80 @@ def insert(path: Path = DATA_FILE) -> int:
     return saved_count
 
 
+def replace_student_lines(lines: list[str], path: Path = DATA_FILE) -> None:
+    """先写临时文件，再替换原文件；用于本单进程练习，不提供并发或断电保障。"""
+    temporary_path = None
+    try:
+        # 与目标文件放在同一个目录，避免跨文件系统替换。
+        # delete=False 让退出 with 后文件仍存在，以便关闭句柄后再替换（Windows 尤其需要）。
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', newline='\n',
+            dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp', delete=False,
+        ) as file:
+            # file.name 是已创建的临时文件名；Path 包装后可以调用 replace / unlink。
+            temporary_path = Path(file.name)
+            file.writelines(lines)
+        # 临时文件完整写入并关闭后，才替换原文件，不提前用 w 清空原数据。
+        if temporary_path.resolve().parent != path.parent.resolve():
+            raise ValueError('临时文件必须与数据文件处于同一目录。')
+        temporary_path.replace(path)
+    finally:
+        # 替换成功后临时路径已不存在；写入或替换失败时则清理本次临时文件。
+        if temporary_path is not None:
+            # unlink 删除文件；missing_ok 只忽略“文件不存在”，不忽略权限等其他错误。
+            temporary_path.unlink(missing_ok=True)
+
+
+def delete_student(student_id: str, path: Path = DATA_FILE) -> bool:
+    """删除一个 ID，成功返回 True；不存在返回 False，且不重写文件。"""
+    student_id = student_id.strip()
+    if not student_id:
+        raise ValueError('待删除 ID 不能为空。')
+    # 先读完并检查整个文件，再考虑写入；损坏数据不会被 eval 执行或被当作空数据。
+    rows = read_student_lines(path)
+    # 解包 ID 和行文本 → 排除待删除 ID → 只把 line 放进新列表；此处还未写磁盘。
+    remaining_lines = [line for current_id, line in rows if current_id != student_id]
+    if len(remaining_lines) == len(rows):
+        return False
+    replace_student_lines(remaining_lines, path)
+    return True
+
+
+def delete(path: Path = DATA_FILE) -> int:
+    """交互删除入口，与实际读写分开，返回本次删除人数。"""
+    deleted_count = 0
+    while True:
+        existing_ids = read_existing_ids(path)
+        if not existing_ids:
+            print('暂无学生信息。')
+            break
+        student_id = input('输入待删除 ID（直接回车返回菜单）：').strip()
+        if not student_id:
+            break
+        # 未找到目标时，不提示成功、不改写文件。
+        if student_id not in existing_ids:
+            print(f'没有找到 ID 为 {student_id} 的学生。')
+        else:
+            answer = input(f'确定删除 ID 为 {student_id} 的学生吗？y/n：').strip().lower()
+            if answer == 'y':
+                if delete_student(student_id, path):
+                    deleted_count += 1
+                    print(f'已删除 ID 为 {student_id} 的学生。')
+                else:
+                    print('该学生已不存在，本次未删除。')
+            else:
+                print('已取消本次删除。')
+        if input('是否继续删除？y/n：').strip().lower() != 'y':
+            break
+    print(f'本次成功删除 {deleted_count} 名学生。')
+    return deleted_count
+
+
 def menu() -> None:
     """当前只展示已实现功能，后续跟着课程扩展。"""
     print('\n======学生信息系统（AI 对照版）======')
     print('1. 录入信息')
+    print('3. 删除信息')
     print('0. 退出')
 
 
@@ -142,10 +222,16 @@ def main() -> None:
                     # 这里是交互边界：给出原因，不宣称未完成的写入已经成功。
                     print(f'录入中止：{error}')
                     print('请检查数据文件或权限；已提示保存成功的记录无需重复录入。')
+            elif choice == '3':
+                try:
+                    delete()
+                except (OSError, ValueError) as error:
+                    print(f'删除中止：{error}')
+                    print('请检查数据文件或权限；未完成替换时不会提示删除成功。')
             else:
-                print('当前仅支持 0 和 1，请重新选择。')
+                print('当前仅支持 0、1 和 3，请重新选择。')
     except (KeyboardInterrupt, EOFError):
-        print('\n已结束输入；尚未完整录入的这条记录不会保存。')
+        print('\n已结束输入；完整记录的保存或删除以此前的成功提示为准。')
 
 
 if __name__ == '__main__':
