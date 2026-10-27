@@ -183,7 +183,7 @@ python python-learn2/stusystem-ai.py
 
 先读 `read_score()`，再读 `save()`，最后看 `insert()` 如何组合它们，之后再看重复 ID 检查与菜单。
 
-添加功能部分聚焦录入与保存。当前对照版还提供后续学到的删除功能，见本文件的“删除功能”分类；其他功能随课程继续扩展。
+添加功能部分聚焦录入与保存。当前对照版还提供后续学到的删除与编辑功能，见本文件对应分类；其他功能随课程继续扩展。
 
 数据位置固定为脚本同目录的 `student-ai.jsonl`。原程序的相对路径 `student.txt` 按启动时工作目录解释，两者不共用文件，也没有自动迁移旧数据。
 
@@ -509,3 +509,177 @@ delete：负责与使用者交互
 
 > [!question]- 回顾：把 remaining_lines 最前面的 line 改成 current_id，会得到什么？
 > 得到“保留学生 ID 的列表”，而不是原记录文本列表。若直接写回文件就会丢失姓名和成绩，因此要先想清楚结果表达式应当收集什么。
+
+### 编辑功能：modify 与 modify_student
+
+原始文件：`python-learn2/stusystem.py`，保留你的课程版本。
+
+对照文件：`python-learn2/stusystem-ai.py`，菜单“4. 修改信息”。
+
+关联知识：[[ai-ta-基础课程10补充]]、[[ai-ta-基础课程11补充]]、[[ai-ta-基础课程14补充]]
+
+#### 一、编辑功能的问题记录
+
+##### 问题 1：os.path.exists(filename) 做什么？
+
+**解答：** 检查路径是否存在，返回 True / False，不创建文件，也不读取文件内容。存在的目录也能返回 True；只判断是否文件用 `os.path.isfile()`。
+
+```python
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+with TemporaryDirectory(prefix='student-note-') as directory:
+    missing = Path(directory) / 'not-created.txt'
+    print(os.path.exists(directory))  # True：目录也算存在
+    print(os.path.isfile(directory))  # False：这不是普通文件
+    print(os.path.exists(missing))    # False：构造路径不创建文件
+```
+
+原版先检查存在性，再决定是否读取；对照版读取时捕获 FileNotFoundError。存在性检查不能保证下一刻打开仍成功，也不保证有读取权限，所以它不能替代必要的异常处理。
+
+Path 的对应写法是 `path.exists()`、`path.is_file()`。当前对照代码没有为了使用 os 而额外导入它，学习的是同一需求的不同接口。
+
+##### 问题 2：isinstance 做什么，和类型转换有什么区别？
+
+**解答：** `isinstance(对象, 类型)` 判断对象是否为该类型或其子类实例，不修改或转换对象。这里再次联系编辑校验理解：
+
+```python
+value = '90'
+print(isinstance(value, str))  # True
+print(isinstance(value, int))  # False
+number = int(value)            # 才真正发生转换
+print(isinstance(number, int)) # True
+print(isinstance({}, dict))    # True
+print(isinstance(90.5, (int, float)))  # True：符合其中一种即可
+```
+
+在 validate_student 中，先确认是字典，再读取字段；之后分别检查 ID、姓名和成绩，不能把“是字典”当作“所有字段都正确”。
+
+```python
+print(isinstance(True, int))   # True：bool 是 int 的子类
+print(isinstance(True, bool))  # True
+```
+
+因此 `isinstance(score, bool) or not isinstance(score, int)` 表示“布尔值，或者不是整数”，任一满足就拒绝。这能阻止 True 被当作成绩 1；仅写 isinstance(score, int) 不会排除布尔值。
+
+添加功能的问题记录中也讲过 isinstance；这里补充的是它与编辑成绩校验、bool 继承关系的联系。
+
+##### 问题 3：read_score 中单独的 * 是占位符吗，可以不用吗？
+
+**解答：** 不是占位符。单独的 `*` 要求后面的参数只能按关键字传入。当前函数签名是：
+
+```text
+def read_score(subject: str, *, default: Optional[int] = None) -> int:
+```
+
+- subject 可按位置传入，例如 `'英语'`。
+- default 是普通参数名，不是 Python 关键字，表示“空输入时保留的成绩”。
+- `default=...` 是调用时赋值；签名中的 `= None` 表示未提供时使用 None。
+- `Optional[int]` 表示 int 或 None，不是“参数一定能省略”；能省略是因为这里另有默认值。
+
+用一个不交互输入的简化函数只演示参数规则：
+
+```python
+def show_score_argument(subject, *, default=None):
+    return subject, default
+
+print(show_score_argument('英语'))             # ('英语', None)
+print(show_score_argument('英语', default=80)) # ('英语', 80)
+# show_score_argument('英语', 80)              # TypeError：不能按位置传 default
+```
+
+去掉 `*` 也可以，但调用规则随之改变：
+
+```python
+def show_score_argument(subject, default=None):
+    return subject, default
+
+print(show_score_argument('英语', 80))         # ('英语', 80)
+print(show_score_argument('英语', default=80)) # ('英语', 80)
+```
+
+所以它不是业务上必需的，却也不是纯装饰：保留它可以强制调用者写清楚 `default=80`，减少位置含义不明确的问题。
+
+> [!tip] 单独的星号与带名字的星号
+> `def f(a, *, option=None)`：单独的星号限制后面的参数只能按关键字传。
+> `def f(*args)`：收集多个位置实参到元组 args。
+> 两者都用星号，但不表示同一种操作。
+
+#### 二、编辑功能的优化代码说明
+
+##### 1. 从“先清空再问输入”改为“先准备，再保存”
+
+原版先以 w 打开文件，再等待姓名、成绩输入；这时旧内容已经清空，中途报错或退出可能丢失记录。成绩直接使用 input 的返回值，还会把整数成绩改成字符串，普通输入并不会因为这个逻辑问题自动报错。
+
+对照版先收集、转换与校验输入，确认后复用删除功能的临时文件替换，再显示修改成功。不使用 eval，也不提前以 w 打开原文件。
+
+##### 2. 函数如何分工？
+
+| 函数 | 职责 |
+| --- | --- |
+| `modify()` | 交互：找学生、展示当前信息、收集修改、确认、连续编辑 |
+| `read_score()` | 单科输入与重试；编辑时可回车保留默认成绩 |
+| `validate_score()` | 检查整数类型、排除 bool、检查 0～100 范围 |
+| `validate_student()` | 检查完整记录，返回字段明确的学生字典 |
+| `modify_student()` | 按 ID 更新数据，保留其他记录和目标的额外字段 |
+| `replace_student_lines()` | 复用已有的临时文件写入、关闭与替换流程 |
+
+validate_student 不会自动把历史文件中的 `'90'` 转为 90，旧数据类型有误时会报告问题，避免静默改变不符合约定的数据。
+
+##### 3. 为什么编辑时可以回车，录入时却不行？
+
+录入调用 `read_score('英语')`，default 是 None，空输入仍需重试；编辑调用 `read_score('英语', default=current['english'])`，明确提供旧成绩，空输入就返回它。
+
+判断使用 `default is not None`，而不是 `if default`，因为 0 分是假值但仍是合法成绩。默认成绩也会先经过 validate_score 检查。
+
+姓名使用 `.strip()` 清理后，`name or current['name']` 表示空输入保留原名；这里只处理已校验为非空字符串的姓名，不把这个规则随意用于数字成绩。
+
+##### 4. ID 和其他字段怎么处理？
+
+ID 用于定位学生，这一版不允许编辑 ID，避免引入与其他记录冲突的问题。modify_student 也会校验传入记录的 ID 必须与待修改 ID 一致，而不只是依赖界面不提供输入框。
+
+找到目标后，先复制原字典，再用 update 更新已编辑字段，因此目标记录的额外字段仍保留。其余学生继续使用原文本行；不是只保存编辑界面上看得到的几个字段。
+
+##### 5. 未变化、取消与失败如何区分？
+
+| 情况 | 行为 |
+| --- | --- |
+| 文件不存在或为空 | 提示暂无学生，不自动创建数据文件 |
+| 输入空 ID | 返回菜单 |
+| ID 不存在 | 提示未找到，不写文件 |
+| 全部回车保留，内容未变化 | 提示未变化，不写文件，也不再确认保存 |
+| 内容改变但未确认 | 提示取消，不写文件 |
+| 输入不合法 | 重试对应字段；已有文件结构不合法则报告错误 |
+| 写回失败 | 不增加成功次数，不显示已修改 |
+| 同一学生连续编辑两次并成功保存 | 计为两次修改，不是两名学生 |
+
+modify_student 返回 True 表示完成写回，False 表示目标不存在或内容相同；校验与 I/O 错误通过异常报告。modify 返回成功保存的次数，两者含义不同。
+
+##### 6. 连续编辑为什么使用循环？
+
+原版在文件仍打开时递归调用 modify，调用层数和打开的文件可能累积。对照版使用 while 循环，每次准备好修改后完成独立写回，再进入下一轮，不靠递归表达重复菜单操作。
+
+临时文件替换仍是单进程练习方案，不保证并发更新和断电持久化；需要多用户修改时，应进一步考虑数据库事务等机制。
+
+##### 7. 回顾练习
+
+先看下面简化逻辑，判断空输入时会得到什么：
+
+```python
+def keep_or_convert(raw, *, default=None):
+    if not raw and default is not None:
+        return default
+    return int(raw)
+
+print(keep_or_convert('', default=0))   # 0
+print(keep_or_convert('', default=80))  # 80
+print(keep_or_convert('90', default=80)) # 90
+```
+
+这只演示默认值选择，没有完整的空白、范围与异常处理，不代替真实 read_score 函数。
+
+> [!question]- 为什么这里不能把 default is not None 改成 if default？
+> 因为 default=0 时为假，会错误地继续尝试 int('')，导致 ValueError。None 表示“没有默认成绩”，不等于 0 分。
+
+可以用 AI 对照版尝试“只改姓名”“0 分回车保留”“输错一科后重试”“取消保存”和“修改不存在的 ID”。有新疑问先在对话中提问，收到下一次记笔记指令后再统一整理。

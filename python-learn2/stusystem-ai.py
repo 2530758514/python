@@ -1,12 +1,12 @@
-"""学生系统对照版：实现当前学到的录入、保存与按 ID 删除。"""
+"""学生系统对照版：实现录入、保存，以及按 ID 删除和编辑。"""
 
 # 运行：python python-learn2/stusystem-ai.py
 # 数据保存在本文件同目录的 student-ai.jsonl，每行一个 JSON 对象。
 # 不读取或改写原程序的 student.txt。类型标注写法要求 Python 3.9+。
 import json  # 字典与 JSON 文本互转，对应 JS 的 JSON.stringify / JSON.parse 用途。
-import tempfile  # 创建临时文件；删除时先写副本，再替换原数据文件。
+import tempfile  # 创建临时文件；删除或编辑时先写副本，再替换原数据文件。
 from pathlib import Path  # 路径对象，提供路径拼接和 open 等方法。
-from typing import TypedDict  # 向编辑器说明字典字段，不自动做运行时校验。
+from typing import Optional, TypedDict  # Optional[int] 表示整数或 None。
 
 
 class Student(TypedDict):
@@ -23,20 +23,41 @@ class Student(TypedDict):
 DATA_FILE = Path(__file__).resolve().parent / 'student-ai.jsonl'
 
 
-def read_score(subject: str) -> int:
+def validate_score(score: object) -> int:
+    """集中校验成绩，输入界面和编辑保存共用同一规则。"""
+    # isinstance 只判断、不转换；True 也属于 int，因此先明确排除 bool。
+    if isinstance(score, bool) or not isinstance(score, int):
+        raise TypeError('成绩必须是整数，不能是布尔值或字符串。')
+    if not 0 <= score <= 100:
+        raise ValueError('成绩必须在 0～100 之间。')
+    return score
+
+
+def read_score(subject: str, *, default: Optional[int] = None) -> int:
     """只重试输错的这一科，不要求重新输入姓名与其他成绩。"""
+    # 单独的 * 不是占位符：default 只能写成 default=80，不能作为第二个位置实参。
+    # default 是普通参数名；Optional[int] 表示 int 或 None，= None 才提供默认值。
+    # 编辑时传入旧成绩，允许回车保留；录入时不传 default，仍然必须填写。
+    if default is not None:
+        validate_score(default)
     # subject: str / -> int 是可选类型说明，真正的转换由下面 int(raw) 完成。
     while True:
         # strip 去两端空白，返回新字符串；不删除中间空格。
-        raw = input(f'{subject}成绩（0～100 的整数）：').strip()
+        prompt = f'{subject}成绩（0～100 的整数）：'
+        if default is not None:
+            prompt = f'{subject}成绩（当前 {default}，回车保留）：'
+        raw = input(prompt).strip()
+        if not raw and default is not None:
+            return default  # 0 分也可以保留，不能写 if default。
         try:
             score = int(raw)
         except ValueError:
             print('请输入整数，例如 80；不能输入空内容或 80.5。')
             continue
-        if 0 <= score <= 100:
-            return score
-        print('成绩必须在 0～100 之间，请重新输入。')
+        try:
+            return validate_score(score)
+        except ValueError as error:
+            print(f'{error}请重新输入。')
 
 
 def read_student_lines(path: Path = DATA_FILE) -> list[tuple[str, str]]:
@@ -197,11 +218,108 @@ def delete(path: Path = DATA_FILE) -> int:
     return deleted_count
 
 
+def validate_student(record: object) -> Student:
+    """编辑前检查完整字段；类型标注不能代替运行时的数据检查。"""
+    # 是字典仅代表容器类型正确，后面仍要逐项检查 ID、姓名和成绩。
+    if not isinstance(record, dict):
+        raise ValueError('学生记录必须是字典。')
+    student_id = record.get('id')
+    name = record.get('name')
+    if not isinstance(student_id, str) or not student_id.strip():
+        raise ValueError('学生 ID 必须是非空字符串。')
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError('学生姓名必须是非空字符串。')
+    return {
+        'id': student_id.strip(),
+        'name': name.strip(),
+        'english': validate_score(record.get('english')),
+        'python': validate_score(record.get('python')),
+        'java': validate_score(record.get('java')),
+    }
+
+
+def modify_student(student_id: str, updated: Student, path: Path = DATA_FILE) -> bool:
+    """更新一个已有 ID；不存在或内容相同返回 False，校验或写回失败则抛错。"""
+    student_id = student_id.strip()
+    if not student_id:
+        raise ValueError('待修改 ID 不能为空。')
+    candidate = validate_student(updated)
+    if candidate['id'] != student_id:
+        raise ValueError('编辑时不能修改学生 ID。')
+
+    rows = read_student_lines(path)
+    for index, (current_id, line) in enumerate(rows):
+        if current_id != student_id:
+            continue
+        # 在原字典副本上更新已编辑字段，保留其他可能存在的额外字段。
+        record = json.loads(line)
+        replacement = record.copy()
+        replacement.update(candidate)
+        if replacement == record:
+            return False
+        replacement_line = json.dumps(replacement, ensure_ascii=False) + '\n'
+        lines = [original_line for _current_id, original_line in rows]
+        lines[index] = replacement_line
+        # 只在所有输入和序列化完成后写回，复用删除时的临时文件替换逻辑。
+        replace_student_lines(lines, path)
+        return True
+    return False
+
+
+def modify(path: Path = DATA_FILE) -> int:
+    """循环编辑入口；每次确认保存后才更新本次成功次数，不递归调用自己。"""
+    modified_count = 0
+    while True:
+        rows = read_student_lines(path)
+        if not rows:
+            print('暂无学生信息。')
+            break
+        student_id = input('输入待修改 ID（直接回车返回菜单）：').strip()
+        if not student_id:
+            break
+
+        current_line = None
+        for current_id, line in rows:
+            if current_id == student_id:
+                current_line = line
+                break
+        if current_line is None:
+            print(f'没有找到 ID 为 {student_id} 的学生。')
+        else:
+            current = validate_student(json.loads(current_line))
+            print(f"当前：{current['name']}，英语 {current['english']}，"
+                  f"Python {current['python']}，Java {current['java']}")
+            name = input(f"姓名（当前 {current['name']}，回车保留）：").strip()
+            updated: Student = {
+                'id': student_id,  # 保留原 ID，避免编辑后与其他学生冲突。
+                'name': name or current['name'],
+                'english': read_score('英语', default=current['english']),
+                'python': read_score('Python', default=current['python']),
+                'java': read_score('Java', default=current['java']),
+            }
+            if updated == current:
+                print('内容没有变化，未写入文件。')
+            else:
+                answer = input('确定保存以上修改吗？y/n：').strip().lower()
+                if answer != 'y':
+                    print('已取消本次修改。')
+                elif modify_student(student_id, updated, path):
+                    modified_count += 1
+                    print(f'已修改 ID 为 {student_id} 的学生。')
+                else:
+                    print('目标已不存在或内容相同，本次未保存。')
+        if input('是否继续修改？y/n：').strip().lower() != 'y':
+            break
+    print(f'本次成功保存 {modified_count} 次修改。')
+    return modified_count
+
+
 def menu() -> None:
     """当前只展示已实现功能，后续跟着课程扩展。"""
     print('\n======学生信息系统（AI 对照版）======')
     print('1. 录入信息')
     print('3. 删除信息')
+    print('4. 修改信息')
     print('0. 退出')
 
 
@@ -228,10 +346,16 @@ def main() -> None:
                 except (OSError, ValueError) as error:
                     print(f'删除中止：{error}')
                     print('请检查数据文件或权限；未完成替换时不会提示删除成功。')
+            elif choice == '4':
+                try:
+                    modify()
+                except (OSError, ValueError, TypeError) as error:
+                    print(f'修改中止：{error}')
+                    print('请检查数据内容或权限；未完成替换时不会提示修改成功。')
             else:
-                print('当前仅支持 0、1 和 3，请重新选择。')
+                print('当前仅支持 0、1、3 和 4，请重新选择。')
     except (KeyboardInterrupt, EOFError):
-        print('\n已结束输入；完整记录的保存或删除以此前的成功提示为准。')
+        print('\n已结束输入；已完成的保存、删除或修改以此前的成功提示为准。')
 
 
 if __name__ == '__main__':
