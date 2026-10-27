@@ -1,4 +1,4 @@
-"""学生系统对照版：实现录入、保存，以及按 ID 删除和编辑。"""
+"""学生系统对照版：实现录入、查询、删除和编辑。"""
 
 # 运行：python python-learn2/stusystem-ai.py
 # 数据保存在本文件同目录的 student-ai.jsonl，每行一个 JSON 对象。
@@ -61,7 +61,7 @@ def read_score(subject: str, *, default: Optional[int] = None) -> int:
 
 
 def read_student_lines(path: Path = DATA_FILE) -> list[tuple[str, str]]:
-    """返回每条记录的 (ID, 原文本行)，供查重与删除复用。只校验 JSON 和 ID。"""
+    """返回 (ID, 原文本行)，供各功能复用。只校验 JSON 和 ID。"""
     # 保留原文本行，删除时不重建其他学生的字典，避免遗漏尚未用到的字段。
     rows: list[tuple[str, str]] = []
     existing_ids: set[str] = set()
@@ -219,7 +219,7 @@ def delete(path: Path = DATA_FILE) -> int:
 
 
 def validate_student(record: object) -> Student:
-    """编辑前检查完整字段；类型标注不能代替运行时的数据检查。"""
+    """检查完整学生字段，供编辑与查询展示复用；类型标注不代替运行时检查。"""
     # 是字典仅代表容器类型正确，后面仍要逐项检查 ID、姓名和成绩。
     if not isinstance(record, dict):
         raise ValueError('学生记录必须是字典。')
@@ -314,10 +314,83 @@ def modify(path: Path = DATA_FILE) -> int:
     return modified_count
 
 
+def search_students(
+    path: Path = DATA_FILE, *, student_id: str = '', name: str = '',
+) -> list[Student]:
+    """精确查询并返回新列表；两种条件都传入时优先 ID，不写入文件。"""
+    student_id = student_id.strip()
+    name = name.strip()
+    if not student_id and not name:
+        raise ValueError('请提供学生 ID 或姓名，不能用空条件查询。')
+
+    results: list[Student] = []
+    for current_id, line in read_student_lines(path):
+        try:
+            student = validate_student(json.loads(line))
+        except (TypeError, ValueError) as error:
+            # 有坏记录时明确指出，不悄悄跳过后把不完整结果当作查询成功。
+            raise ValueError(f'ID 为 {current_id} 的学生记录有误：{error}') from error
+        # 保留课程的规则：ID 非空时只查 ID，不因 ID 不匹配再改查姓名。
+        if student_id:
+            matches = student['id'] == student_id
+        else:
+            matches = student['name'] == name
+        if matches:
+            results.append(student)
+    # 每次调用新建结果列表，同名学生可以有多条，连续查询不会混入上次结果。
+    return results
+
+
+def show_student(students: list[Student]) -> None:
+    """展示结果和总分，不修改记录；用列分隔而非依赖终端制表位。"""
+    if not students:
+        print('未找到匹配的学生。')
+        return
+    # 全部检查通过后再输出表格，避免打印到一半才发现成绩不能相加。
+    validated = [validate_student(student) for student in students]
+    print('ID | 姓名 | 英语 | Python | Java | 总分')
+    for student in validated:
+        total_score = student['english'] + student['python'] + student['java']
+        values = (
+            student['id'], student['name'], str(student['english']),
+            str(student['python']), str(student['java']), str(total_score),
+        )
+        # join 拼接的每一项都须是字符串；分隔列不承诺中英文等宽对齐。
+        print(' | '.join(values))
+    print(f'共找到 {len(validated)} 名学生。')
+
+
+def search(path: Path = DATA_FILE) -> None:
+    """交互查询入口；读取、筛选和展示各自独立，输入错误用循环重试。"""
+    while True:
+        if not read_existing_ids(path):
+            print('暂无学生信息。')
+            return
+        mode = input('按 ID 查询输入 1，按姓名查询输入 2，返回输入 0：').strip()
+        if mode == '0':
+            return
+        if mode not in ('1', '2'):
+            print('请输入 0、1 或 2。')
+            continue  # 不递归调用 search，避免旧一轮流程在返回后继续执行。
+
+        keyword = input('输入查询内容（精确匹配，直接回车返回菜单）：').strip()
+        if not keyword:
+            print('已取消本次查询。')
+            return
+        if mode == '1':
+            results = search_students(path, student_id=keyword)
+        else:
+            results = search_students(path, name=keyword)
+        show_student(results)
+        if input('是否继续查询？y/n：').strip().lower() != 'y':
+            return
+
+
 def menu() -> None:
     """当前只展示已实现功能，后续跟着课程扩展。"""
     print('\n======学生信息系统（AI 对照版）======')
     print('1. 录入信息')
+    print('2. 查询信息')
     print('3. 删除信息')
     print('4. 修改信息')
     print('0. 退出')
@@ -340,6 +413,12 @@ def main() -> None:
                     # 这里是交互边界：给出原因，不宣称未完成的写入已经成功。
                     print(f'录入中止：{error}')
                     print('请检查数据文件或权限；已提示保存成功的记录无需重复录入。')
+            elif choice == '2':
+                try:
+                    search()
+                except (OSError, ValueError, TypeError) as error:
+                    print(f'查询中止：{error}')
+                    print('请检查数据文件或权限，查询不会修改文件。')
             elif choice == '3':
                 try:
                     delete()
@@ -353,7 +432,7 @@ def main() -> None:
                     print(f'修改中止：{error}')
                     print('请检查数据内容或权限；未完成替换时不会提示修改成功。')
             else:
-                print('当前仅支持 0、1、3 和 4，请重新选择。')
+                print('当前仅支持 0、1、2、3 和 4，请重新选择。')
     except (KeyboardInterrupt, EOFError):
         print('\n已结束输入；已完成的保存、删除或修改以此前的成功提示为准。')
 
