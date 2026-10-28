@@ -1,4 +1,4 @@
-"""学生系统对照版：实现录入、查询、删除和编辑。"""
+"""学生系统对照版：增删改查，以及列表显示、总数统计和成绩排序。"""
 
 # 运行：python python-learn2/stusystem-ai.py
 # 数据保存在本文件同目录的 student-ai.jsonl，每行一个 JSON 对象。
@@ -219,7 +219,7 @@ def delete(path: Path = DATA_FILE) -> int:
 
 
 def validate_student(record: object) -> Student:
-    """检查完整学生字段，供编辑与查询展示复用；类型标注不代替运行时检查。"""
+    """检查完整学生字段，供编辑与读取展示复用；类型标注不代替运行时检查。"""
     # 是字典仅代表容器类型正确，后面仍要逐项检查 ID、姓名和成绩。
     if not isinstance(record, dict):
         raise ValueError('学生记录必须是字典。')
@@ -314,6 +314,24 @@ def modify(path: Path = DATA_FILE) -> int:
     return modified_count
 
 
+def read_students(path: Path = DATA_FILE) -> list[Student]:
+    """读取并校验全部学生，供查询、列表、统计与排序共用，不修改文件。"""
+    students: list[Student] = []
+    for student_id, line in read_student_lines(path):
+        try:
+            student = validate_student(json.loads(line))
+        except (TypeError, ValueError) as error:
+            # 有坏记录就报告，不默默跳过后显示不完整的名单或错误的总人数。
+            raise ValueError(f'ID 为 {student_id} 的学生记录有误：{error}') from error
+        students.append(student)
+    return students
+
+
+def get_total_score(student: Student) -> int:
+    """计算已经通过字段校验的学生总分，不向原字典添加字段。"""
+    return student['english'] + student['python'] + student['java']
+
+
 def search_students(
     path: Path = DATA_FILE, *, student_id: str = '', name: str = '',
 ) -> list[Student]:
@@ -324,12 +342,7 @@ def search_students(
         raise ValueError('请提供学生 ID 或姓名，不能用空条件查询。')
 
     results: list[Student] = []
-    for current_id, line in read_student_lines(path):
-        try:
-            student = validate_student(json.loads(line))
-        except (TypeError, ValueError) as error:
-            # 有坏记录时明确指出，不悄悄跳过后把不完整结果当作查询成功。
-            raise ValueError(f'ID 为 {current_id} 的学生记录有误：{error}') from error
+    for student in read_students(path):
         # 保留课程的规则：ID 非空时只查 ID，不因 ID 不匹配再改查姓名。
         if student_id:
             matches = student['id'] == student_id
@@ -350,14 +363,14 @@ def show_student(students: list[Student]) -> None:
     validated = [validate_student(student) for student in students]
     print('ID | 姓名 | 英语 | Python | Java | 总分')
     for student in validated:
-        total_score = student['english'] + student['python'] + student['java']
+        total_score = get_total_score(student)
         values = (
             student['id'], student['name'], str(student['english']),
             str(student['python']), str(student['java']), str(total_score),
         )
         # join 拼接的每一项都须是字符串；分隔列不承诺中英文等宽对齐。
         print(' | '.join(values))
-    print(f'共找到 {len(validated)} 名学生。')
+    print(f'共显示 {len(validated)} 名学生。')
 
 
 def search(path: Path = DATA_FILE) -> None:
@@ -386,6 +399,81 @@ def search(path: Path = DATA_FILE) -> None:
             return
 
 
+def count_students(path: Path = DATA_FILE) -> int:
+    """统计校验通过的学生人数，不把空白行或损坏记录当作学生。"""
+    return len(read_students(path))
+
+
+def total(path: Path = DATA_FILE) -> None:
+    """菜单中的人数统计入口；文件不存在或空文件时人数为 0。"""
+    print(f'学生总人数：{count_students(path)}')
+
+
+def show(path: Path = DATA_FILE) -> None:
+    """按文件中原有顺序显示全部学生。"""
+    students = read_students(path)
+    if not students:
+        print('暂无学生信息。')
+        return
+    show_student(students)
+
+
+def sort_students(
+    students: list[Student], *, by: str = 'total', descending: bool = False,
+) -> list[Student]:
+    """返回排序后的新列表，不修改传入列表；同分学生保留原先相对顺序。"""
+    if by not in ('english', 'python', 'java', 'total'):
+        raise ValueError('排序依据必须是 english、python、java 或 total。')
+    if not isinstance(descending, bool):
+        raise TypeError('descending 必须是布尔值。')
+    validated = [validate_student(student) for student in students]
+
+    def sort_key(student: Student) -> int:
+        # 与 key=lambda x: x['english'] 的作用相同，这里集中处理四种排序依据。
+        if by == 'english':
+            return student['english']
+        if by == 'python':
+            return student['python']
+        if by == 'java':
+            return student['java']
+        return get_total_score(student)
+
+    # key 接收函数，不写 sort_key()；成绩已是整数，不再用 int 掩盖类型错误。
+    # sorted 返回新列表；reverse=True 是降序，False 是升序。
+    return sorted(validated, key=sort_key, reverse=descending)
+
+
+def sort(path: Path = DATA_FILE) -> None:
+    """交互排序，只展示结果，不将排序顺序写回文件。"""
+    students = read_students(path)
+    if not students:
+        print('暂无学生信息。')
+        return
+    while True:
+        direction = input('升序输入 0，降序输入 1，返回输入 q：').strip().lower()
+        if direction == 'q':
+            return
+        if direction in ('0', '1'):
+            break
+        print('请输入 0、1 或 q。')
+
+    modes = {'0': 'total', '1': 'english', '2': 'python', '3': 'java'}
+    labels = {'0': '总分', '1': '英语', '2': 'Python', '3': 'Java'}
+    while True:
+        mode = input('按总分输入 0，英语 1，Python 2，Java 3，返回 q：').strip().lower()
+        if mode == 'q':
+            return
+        if mode in modes:
+            break
+        print('请输入 0、1、2、3 或 q。')
+
+    descending = direction == '1'  # 把输入字符串转换为明确的布尔值，而不是 bool('0')。
+    ordered = sort_students(students, by=modes[mode], descending=descending)
+    order_label = '降序' if descending else '升序'
+    print(f'按{labels[mode]}{order_label}显示（不修改文件顺序）：')
+    show_student(ordered)
+
+
 def menu() -> None:
     """当前只展示已实现功能，后续跟着课程扩展。"""
     print('\n======学生信息系统（AI 对照版）======')
@@ -393,6 +481,9 @@ def menu() -> None:
     print('2. 查询信息')
     print('3. 删除信息')
     print('4. 修改信息')
+    print('5. 排序显示')
+    print('6. 学生总人数')
+    print('7. 显示所有学生')
     print('0. 退出')
 
 
@@ -431,8 +522,19 @@ def main() -> None:
                 except (OSError, ValueError, TypeError) as error:
                     print(f'修改中止：{error}')
                     print('请检查数据内容或权限；未完成替换时不会提示修改成功。')
+            elif choice in ('5', '6', '7'):
+                try:
+                    if choice == '5':
+                        sort()
+                    elif choice == '6':
+                        total()
+                    else:
+                        show()
+                except (OSError, ValueError, TypeError) as error:
+                    print(f'读取或展示中止：{error}')
+                    print('请检查数据内容或权限，本次操作不会修改文件。')
             else:
-                print('当前仅支持 0、1、2、3 和 4，请重新选择。')
+                print('请输入 0～7 之间的菜单选项。')
     except (KeyboardInterrupt, EOFError):
         print('\n已结束输入；已完成的保存、删除或修改以此前的成功提示为准。')
 

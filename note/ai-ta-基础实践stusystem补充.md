@@ -183,7 +183,7 @@ python python-learn2/stusystem-ai.py
 
 先读 `read_score()`，再读 `save()`，最后看 `insert()` 如何组合它们，之后再看重复 ID 检查与菜单。
 
-添加功能部分聚焦录入与保存。当前对照版还提供后续学到的删除与编辑功能，见本文件对应分类；其他功能随课程继续扩展。
+添加功能部分聚焦录入与保存。查询、删除、编辑、列表、总数统计与排序见本文件对应分类。
 
 数据位置固定为脚本同目录的 `student-ai.jsonl`。原程序的相对路径 `student.txt` 按启动时工作目录解释，两者不共用文件，也没有自动迁移旧数据。
 
@@ -683,3 +683,228 @@ print(keep_or_convert('90', default=80)) # 90
 > 因为 default=0 时为假，会错误地继续尝试 int('')，导致 ValueError。None 表示“没有默认成绩”，不等于 0 分。
 
 可以用 AI 对照版尝试“只改姓名”“0 分回车保留”“输错一科后重试”“取消保存”和“修改不存在的 ID”。有新疑问先在对话中提问，收到下一次记笔记指令后再统一整理。
+
+### 查询功能：search 与 search_students
+
+#### 一、查询功能的问题记录
+
+##### 问题 1：插件为什么建议合并嵌套 if？
+
+**解答：** 如果只有外层条件和内层条件同时成立，才执行同一段操作，可以用 and 合并，减少缩进。这是可读性建议，不是运行错误。
+
+```python
+name = '张三'
+student = {'id': '001', 'name': '张三'}
+if name != '':
+    if student['name'] == name:
+        print('匹配')
+
+if name != '' and student['name'] == name:
+    print('匹配')
+# 两种写法各输出一次“匹配”。
+```
+
+但是原版外层的 if / elif 还有“ID 非空就只按 ID 查”的规则，不能只为缩短代码而丢掉这个限制。
+
+##### 问题 2：多个 and / or 放在一起为什么会查出所有学生？
+
+**解答：** 最初尝试的 `id != '' or name != '' and d['id'] == id or d['name'] == name` 中，and 优先于 or。只要 ID 非空，第一项就为真，不再要求记录的 ID 匹配。
+
+如果需求是“ID 匹配或姓名匹配”，应该把每个条件组写清楚：
+
+```python
+student_id = '001'
+name = ''
+student = {'id': '002', 'name': '李四'}
+matched = (
+    (student_id != '' and student['id'] == student_id)
+    or (name != '' and student['name'] == name)
+)
+print(matched)  # False
+```
+
+这仍不等于所有场景下的原始 if / elif：如果两个查询条件都填写，OR 允许其中任意一个匹配；原版优先 ID，不会因 ID 不匹配再退回姓名。
+
+| 输入情况 | 原版 ID 优先 | ID 或姓名任一匹配 |
+| --- | --- | --- |
+| 只填 ID | 按 ID 查 | 按 ID 查 |
+| 只填姓名 | 按姓名查 | 按姓名查 |
+| 两个都填，ID 不匹配但姓名匹配 | 不加入结果 | 加入结果 |
+
+目前界面每轮只选择一种查询方式，另一个条件为空，因此在此前提下，正确的 OR 写法与原版对正常记录的查询结果相同。对照版的 search_students 在两个条件都传入时仍明确优先 ID。
+
+##### 问题 3：改成两个独立 if 可以吗？
+
+**解答：** 每次只填写一个条件时可以得到相同结果，但两个独立 if 都会被检查；若两个条件都填写且都匹配，就会 append 两次。
+
+```python
+student_id = '001'
+name = '张三'
+student = {'id': '001', 'name': '张三'}
+results = []
+if student_id and student['id'] == student_id:
+    results.append(student)
+if name and student['name'] == name:
+    results.append(student)
+print(len(results))  # 2：同一学生重复加入
+```
+
+一个 if 里用 or 连接，最多执行一次 append；if / elif 也只执行其中一个分支。但“每条最多添加一次”和“优先按哪个条件查询”是两个不同问题，要分别考虑。
+
+##### 问题 4：{:^6} 表示什么？
+
+**解答：** `{}` 是占位区域，冒号后是格式说明，`^` 表示居中，6 表示最小宽度，不足用空格补齐。
+
+```python
+print('|{:^6}|'.format('ID'))  # |  ID  |
+print('|{:<6}|'.format('ID'))  # |ID    |：左对齐
+print('|{:>6}|'.format('ID'))  # |    ID|：右对齐
+print('|{:^6}|'.format('Python123'))  # |Python123|：超过宽度不会自动截断
+```
+
+`\t` 是跳到下一个制表位置，不是固定数量空格；格式宽度也不等于中文的屏幕显示宽度。因此中英文混排不保证在所有终端中完全对齐。对照版先用 ` | ` 分隔各列，优先清楚表达字段，不引入复杂终端排版工具。
+
+##### 问题 5：open 中 encoding 必须写吗，不写就不是 UTF-8 吗？
+
+**解答：** 它是可选参数。Python **3.15 起默认开启 UTF-8 模式**，但可以通过运行配置关闭；更早版本的默认文本编码可能受系统和配置影响。本次答疑实测项目使用的 Python 3.15.0 开启了 UTF-8 模式，默认文本文件编码为 utf-8。
+
+这个结论对应当时的解释器检查，不代表其他 IDE、虚拟环境或之后更换的解释器必然相同。[官方说明：PEP 686](https://peps.python.org/pep-0686/)
+
+本项目明确按 UTF-8 写入和读取，保留 `encoding='utf-8'` 可以表达约定并减少跨环境差异。指定编码不是自动识别：读取真正的 GBK 文件时仍需使用匹配编码，不能认为 UTF-8 能解读任意文本文件。
+
+#### 二、查询功能的优化代码说明
+
+##### 1. 交互、筛选与展示分开
+
+| 函数 | 职责 |
+| --- | --- |
+| `search()` | 选择 ID / 姓名查询，处理重试、取消和继续查询 |
+| `search_students()` | 精确匹配并返回新结果列表，不打印、不写文件 |
+| `read_students()` | 读取并校验所有学生，多个功能共用 |
+| `show_student()` | 展示结果与总分，不修改记录 |
+
+每次查询新建结果列表，不需要依赖 clear 清除上一次结果。同名学生可以有多条，ID 和姓名都区分大小写，前后空白按项目已有规则清理。
+
+##### 2. 保留查询规则，修正控制流程
+
+查询方式输错就 continue 回到当前循环，不递归调用 search，避免内层查询结束后旧流程继续执行。输入 0 或空查询内容可返回；没有数据与“有数据但没有匹配结果”使用不同提示。
+
+读取时先检查完整数据。JSON 损坏、重复 ID、字段类型或成绩错误会报告原因，不使用 eval，也不悄悄跳过坏记录后显示不完整结果。
+
+### 列表显示与学生总数：show 与 total
+
+#### 一、列表与总数的问题记录
+
+这部分目前没有单独的新问题；展示格式与 encoding 的疑问已归到上面的“查询功能”，这里不重复记为新的提问。
+
+#### 二、列表与总数的优化代码说明
+
+##### 1. 共用读取逻辑，不各写一套文件解析
+
+`read_students()` 复用 read_student_lines 的 JSON / ID 检查，再复用 validate_student 校验姓名和各科整数成绩。查询、列表、总数和排序因此遵守相同的数据规则。
+
+- `show()`：按读取顺序展示全部学生，复用 show_student。
+- `count_students()`：返回 `len(read_students(path))`。
+- `total()`：打印 count_students 的结果。
+- `get_total_score()`：计算三科总分，排序与展示共用，不给原字典增加 total 字段。
+
+统计的是校验通过的数据记录，不直接使用文件行数。空白行不计数；发现坏记录时中止并报告，而不是忽略后给出一个看似准确的人数。
+
+##### 2. 空文件与显示顺序
+
+文件不存在或空文件时，人数为 0，列表提示“暂无学生信息”，不为了显示而创建数据文件。原名单按文件中有效记录的顺序展示。
+
+show_student 的结尾统一使用“共显示 N 名学生”，便于查询、全部列表和排序结果复用，避免把所有场景都叫作“共找到”。这些操作均只读，不重写文件。
+
+### 排序显示：sort 与 sort_students
+
+#### 一、排序功能的问题记录
+
+##### 问题 1：key=lambda x: int(x['english']) 是什么意思？
+
+**解答：** key 接收一个函数，排序时用该函数为每条记录提取比较依据。x 是当前这一条学生字典，`int(x['english'])` 把英语成绩转为整数后作为排序键；移动的是整条记录。
+
+```python
+students = [
+    {'name': '张三', 'english': '90'},
+    {'name': '李四', 'english': '100'},
+    {'name': '王五', 'english': '80'},
+]
+students.sort(key=lambda student: int(student['english']))
+print([student['name'] for student in students])  # ['王五', '张三', '李四']
+print(students[0]['english'])  # 仍为字符串 '80'，排序键转换不修改原字段
+```
+
+lambda 可以展开成普通函数，key 接收函数对象，不是提前调用函数：
+
+```python
+def get_english(student):
+    return int(student['english'])
+
+students = [{'english': '100'}, {'english': '90'}]
+ordered = sorted(students, key=get_english)
+print([student['english'] for student in ordered])  # ['90', '100']
+```
+
+字符串 `'100'` 按字符串规则会排在 `'90'` 前面，所以课程原数据需要 int 转换。AI 对照版的成绩已在读取时检查为整数，排序时直接使用数值，不用转换来掩盖错误的历史类型。
+
+reverse=False 表示升序，True 表示降序。`list.sort()` 原地修改列表并返回 None，不能写 `students = students.sort(...)`；sorted 则返回新列表。
+
+#### 二、排序功能的优化代码说明
+
+##### 1. 读数据、选规则、排序、展示
+
+```text
+sort：交互入口
+  → read_students：读取并校验名单
+  → 选择升序 / 降序
+  → 选择英语 / Python / Java / 总分
+  → sort_students：生成排序后的新列表
+  → show_student：展示，不写回文件
+```
+
+交互层将菜单 '1' 转为 descending=True，而不是 `bool('1')` / `bool('0')`；后两者都会得到 True，因为都是非空字符串。
+
+非法选项用 while 重试，不递归进入 sort；两个选择阶段都可输入 q 返回。无学生时直接提示，不继续询问排序参数。
+
+##### 2. 四种排序依据集中处理
+
+sort_students 内部的 sort_key 函数根据 by 返回对应科目成绩或总分，再交给 sorted。它与用户问过的 lambda 用途相同，只是把四种依据展开，便于阅读和调试。
+
+```python
+students = [
+    {'id': '001', 'english': 80},
+    {'id': '002', 'english': 90},
+    {'id': '003', 'english': 80},
+]
+ordered = sorted(students, key=lambda student: student['english'], reverse=True)
+print([student['id'] for student in ordered])  # ['002', '001', '003']
+print([student['id'] for student in students]) # ['001', '002', '003']：输入顺序未变
+```
+
+Python 排序是稳定的，同分记录保留原有相对顺序，降序时也一样。界面里的排序只影响本次展示，下一次显示原名单仍按文件原顺序。
+
+##### 3. 排序功能的边界
+
+| 情况 | 行为 |
+| --- | --- |
+| 正常四种依据、两种方向 | 按数值升序或降序展示 |
+| 同分 | 保留原有相对顺序，不额外按 ID 排序 |
+| 参数 by 不受支持 | 报告 ValueError |
+| descending 不是 bool | 报告 TypeError |
+| 空文件 / 不存在 | 提示暂无学生，不创建文件 |
+| 无效成绩、重复 ID 或损坏 JSON | 报告数据问题，不猜测或跳过 |
+| 取消输入 | 返回菜单，不改文件 |
+
+以上是这个小型学习项目约定，不是所有排名产品都必须采用同分顺序规则。若以后需要同分按其他字段排序，再明确需求后扩展。
+
+##### 4. 可以亲自验证的组合
+
+- 准备英语为 9、80、100 的学生，确认按数值而不是按字符串排序。
+- 为两名学生设置相同总分，检查升序与降序中的相对顺序。
+- 排序显示后回到“7. 显示所有学生”，确认原名单顺序没有改变。
+- 在单独复制的练习数据里插入空白行，确认不会增加总人数；不要用真实资料练习损坏数据。
+- 分别输入错误排序选项和 q，确认程序重试或返回，不递归累积调用。
+
+> [!question]- 回顾：为什么 key=get_english 不写成 key=get_english()？
+> key 需要接收函数，排序时由 Python 把每条学生记录传给它。加括号会先尝试调用函数，在本例中既缺少 student 参数，也不能把提取规则交给排序过程。
