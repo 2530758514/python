@@ -225,15 +225,62 @@ def modify():
 
 
 def sort():
-    pass
-
+    show()
+    student_new = []
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as rfile:
+            student = rfile.readlines()
+            for item in student:
+                d = dict(eval(item))
+                student_new.append(d)
+    else:
+        print('文件不存在')
+        return
+    asc_or_desc = input('请选择升序0,降序1:')
+    if asc_or_desc  == '0':
+        asc_or_desc_bool = False
+    elif asc_or_desc == '1':
+        asc_or_desc_bool = True
+    else:
+        print('输入有误,重新输入')
+        sort()
+    mode = input('选择排序方式英语1,python2,java3,总成绩0')
+    if mode == '1':
+        student_new.sort(key=lambda x:int(x['english']), reverse=asc_or_desc_bool)
+    elif mode == '2':
+        student_new.sort(key=lambda x:int(x['python']), reverse=asc_or_desc_bool)
+    elif mode == '3':
+        student_new.sort(key=lambda x:int(x['java']), reverse=asc_or_desc_bool)
+    elif mode == '0':
+        student_new.sort(key=lambda x:int(x['english'])+int(x['python'])+int(x['java']), reverse=asc_or_desc_bool)
+    else:
+        print('输入有误,重新输入')
+        sort()
+    show_student(student_new)
 
 def total():
-    pass
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as rfile:
+            student = rfile.readlines()
+            if student:
+                print(f'一共{len(student)}个学生')
+            else:
+                print('还没有录入学生')
+    else:
+        print('文件不存在')
 
 
 def show():
-    pass
+    student_list = []
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as rfile:
+            student = rfile.readlines()
+            for item in student:
+                student_list.append(eval(item))
+            if student_list:
+                show_student(student_list)    
+    else:
+        print('文件不存在')
 
 
 main()
